@@ -57,13 +57,17 @@ class Trains:
         self.quai_interdits = pd.DataFrame(values, columns=["voiesAQuaiInterdites", "voiesEnLigne", "typesMateriels",
                                                             "typesCirculation"])  # Dataframe des quais interdits
         self.contraintes = pd.DataFrame(data['contraintes'])
+        self.first_itineraires = self.trains["voieAQuai"].to_list()
         # En JAX
         # self.trains = jnp.array(df_flat.to_numpy())
         # self.quai_interdits_jax = jnp.array(values)
         # self.contraintes = jnp.array(data['contraintes'])
 
     def reset(self):
-        pass
+        self.itineraire = self.first_itineraires.copy()
+        self.trains["voieAQuai"] = self.first_itineraires.copy()
+        self.done = False
+
 
     # Getters
     def get_ids(self):
@@ -116,22 +120,22 @@ class Trains:
 
         return json_data
 
-    def set_itineraire(self, train_id, new_itineraire):
+    def set_itineraire(self, train_id, it_id):
         """
         Met à jour l'itinéraire d'un train donné par son ID.
+        - MaJ du quai associé au train dans le DataFrame self.trains
+        - MaJ de la liste des itinéraires des trains dans self.itineraire
         
         :param train_id: L'ID du train à mettre à jour.
-        :param new_itineraire: La nouvelle valeur de l'itinéraire à attribuer au train.
+        :param it_id: La nouvelle valeur de l'itinéraire à attribuer au train.
         """
-        # Trouver l'indice du train avec l'ID correspondant
-        index = self.data[self.data['id'] == train_id].index
-
-        # Si l'ID existe, mettre à jour l'itinéraire
-        if not index.empty:
-            # self.data.at[index[0], 'itineraires'] = new_itineraire
-            self.itineraires[index] = new_itineraire
-        else:
-            raise ValueError(f"Train avec l'ID {train_id} non trouvé.")
+        # Prendre le quai associé à l'itinéraire
+        quai = self.list_it.loc[it_id, "voieAQuai"]
+        # Associer le quai au train
+        self.trains.loc[train_id, "voieAQuai"] = quai
+        # MaJ liste des itinéraires
+        self.itineraire[self.id.index(train_id)] = it_id
+        return
 
     # RESOLUTION
     def is_it_compatible(self, train_id, it_id):
@@ -292,7 +296,7 @@ class Trains:
         :param action: tuple (train_id, it_id)
         :return:
         """
-        self.set_itineraire(train_id=action[0], new_itineraire=action[1])
+        self.set_itineraire(train_id=action[0], it_id=action[1])
         # Compatibilité
         if self.is_it_compatible(train_id=action[0], it_id=action[1]):
             reward = - 1e8
