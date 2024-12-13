@@ -62,6 +62,9 @@ class Trains:
         # self.quai_interdits_jax = jnp.array(values)
         # self.contraintes = jnp.array(data['contraintes'])
 
+    def reset(self):
+        pass
+
     # Getters
     def get_ids(self):
         """Retourne la liste des IDs des trains."""
@@ -232,21 +235,21 @@ class Trains:
         c2 = (self.quai_interdits[:, 1] == ligne) + (self.quai_interdits[:, 1] == 'all')
         c3 = (self.quai_interdits[:, 2] == materiel) + (self.quai_interdits[:, 2] == 'all')
         c4 = (self.quai_interdits[:, 3] == circulation) + (self.quai_interdits[:, 3] == 'all')
-        if (c1*c2*c3*c4).any():
+        if (c1 * c2 * c3 * c4).any():
             self.done = True
 
         return self.done
 
-    def contraintes_itineraire(self, id_train, id_it):
+    def contraintes_itineraire(self, train_id, it_id):
         c = 0
-        index_to_check = self.contraintes[self.contraintes[[0, 1]] == [id_train, id_it]][[0, 1]].dropna().index.tolist()
+        index_to_check = self.contraintes[self.contraintes[[0, 1]] == [train_id, it_id]][[0, 1]].dropna().index.tolist()
         for ind in index_to_check:
             train = self.contraintes.loc[ind, 2]
             it = self.contraintes.loc[ind, 3]
             if it == self.itineraire[self.id.index(train)]:
                 c += self.contraintes.loc[ind, 4]
 
-        index_to_check = self.contraintes[self.contraintes[[2, 3]] == [id_train, id_it]][[2, 3]].dropna().index.tolist()
+        index_to_check = self.contraintes[self.contraintes[[2, 3]] == [train_id, it_id]][[2, 3]].dropna().index.tolist()
         for ind in index_to_check:
             train = self.contraintes.loc[ind, 0]
             it = self.contraintes.loc[ind, 1]
@@ -254,9 +257,9 @@ class Trains:
                 c += self.contraintes.loc[ind, 4]
         return c
 
-    def contraintes_itineraire_jax(self, id_train, id_it):
+    def contraintes_itineraire_jax(self, train_id, it_id):
         c = 0
-        index_to_check = (self.contraintes[:, [0, 1]] == [id_train, id_it]).all(1)
+        index_to_check = (self.contraintes[:, [0, 1]] == [train_id, it_id]).all(1)
         for i, ind in enumerate(index_to_check):  # TODO : Supprimer la boucle for
             if ind:
                 train = self.contraintes[i, 2]
@@ -264,7 +267,7 @@ class Trains:
                 if it == self.itineraire[self.id.index(train)]:
                     c += self.contraintes[i, 4]
 
-        index_to_check = (self.contraintes[:, [2, 3]] == [id_train, id_it]).all(1)
+        index_to_check = (self.contraintes[:, [2, 3]] == [train_id, it_id]).all(1)
         for i, ind in enumerate(index_to_check):
             if ind:
                 train = self.contraintes[i, 0]
@@ -272,6 +275,14 @@ class Trains:
                 if it == self.itineraire[self.id.index(train)]:
                     c += self.contraintes[i, 4]
         return c
+
+    def any_itineraire(self, c=1e3):
+        """
+        Retourne le coût des non attribution des itinéraires.
+        :param c: coût d'un itinéraire non attribué
+        :return:
+        """
+        return c * self.itineraire.count(None)
 
     # ENVIRONNEMENT
     def step(self, action):
@@ -281,7 +292,19 @@ class Trains:
         :param action: tuple (train_id, it_id)
         :return:
         """
-        pass
+        self.set_itineraire(train_id=action[0], new_itineraire=action[1])
+        # Compatibilité
+        if self.is_it_compatible(train_id=action[0], it_id=action[1]):
+            reward = - 1e8
+        elif self.is_quaie_interdit(train_id=action[0], it_quai=action[1]):
+            reward = - 1e8
+        else:
+            reward = self.contraintes_itineraire(train_id=action[0], it_id=action[1])  # On décide de prendre que la
+            # contrainte du nouvel itineraire ? Sinon construire la fonction des calcul des contraintes.
+            reward += self.any_itineraire()  # Coût des quais non-attribués
+
+        return reward, self.done
+
 
 # Exemple d'utilisation
 file_path = "instances/inst_PMP.json"
