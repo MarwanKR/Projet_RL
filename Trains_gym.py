@@ -168,8 +168,15 @@ class TrainEnv(gym.Env):
 
 
     def render(self, mode='human'):
-        print("Current State:")
-        print(self.state)
+        print("Current Itineraire:")
+        print(self.itineraire)
+        cost = 0
+        for train in range(self.number_of_trains):
+            if self.done:
+                return -700
+            cost -= self.contraintes_itineraire(train, self.itineraire[train])
+        return cost
+
 
     def close(self):
         pass
@@ -191,10 +198,10 @@ class TrainEnv(gym.Env):
             return self.done
         else:
             sens_depart_it = self.list_it.loc[it_id, "sensDepart"]
-            voieAQuai_it = self.list_it.loc[it_id, "voieEnLigne"]
+            voieEnLigne_it = self.list_it.loc[it_id, "voieEnLigne"]
             sens_depart_train = self.trains.loc[train_id, "sensDepart"]
-            voieAQuai_train = self.trains.loc[train_id, "voieAQuai"]
-            if sens_depart_train == sens_depart_it and voieAQuai_train == voieAQuai_it:
+            voieEnLigne_train = self.trains.loc[train_id, "voieEnLigne"]
+            if sens_depart_train == sens_depart_it and voieEnLigne_train == voieEnLigne_it:
                 return self.done
         self.done = True
         return self.done
