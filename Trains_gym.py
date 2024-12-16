@@ -142,15 +142,12 @@ class TrainEnv(gym.Env):
 
         if not self.is_it_incompatible(train_id, it_id) and not self.is_quaie_interdit(train_id, it_id):
             reward = -self.contraintes_itineraire(train_id, it_id) / 1000.0
-            if reward>0 : 
-                print("reward = ", reward)
-            
         
         else:
             reward = -30
-            
+
         # self.done = all(self.itineraire)
-        
+
         return self._get_obs(), reward, self.done, False,{}
         # self.set_itineraire(train_id, it_id)
 
@@ -166,10 +163,9 @@ class TrainEnv(gym.Env):
 
         # return self.state, reward, self.done, False, {}
 
-
     def render(self, mode='human'):
-        print("Current Itineraire:")
-        print(self.itineraire)
+        # print("Current Itineraire:")
+        # print(self.itineraire)
         cost = 0
         for train in range(self.number_of_trains):
             if self.done:
@@ -257,8 +253,11 @@ class TrainEnv(gym.Env):
         for ind in index_to_check:
             train = self.contraintes.loc[ind, 0]
             it = self.contraintes.loc[ind, 1]
-            if it == self.itineraire[self.id.index(train)]:
-                c += self.contraintes.loc[ind, 4]
+            try:
+                if it == self.itineraire[self.id.index(train)]:
+                    c += self.contraintes.loc[ind, 4]
+            except ValueError:
+                pass
         return c
 
     
@@ -274,13 +273,13 @@ if __name__ == '__main__':
     # Display data
     dep = env.sens_depart
     print(dep, "sens des départs")
-    
+
     # Step 3: Vectorize the environment
     vec_env = DummyVecEnv([lambda: env])
 
     # Step 4: Create and train the DQN model
     model = DQN("MlpPolicy", vec_env, verbose=0, learning_rate=1e-3, buffer_size=800,seed=random_seed)
-    number_of_episodes = 2100
+    number_of_episodes = 300
     max_number_of_steps = 100
     # Tracking cumulative rewards
     episode_rewards = []  # List to store total reward per episode
@@ -289,16 +288,14 @@ if __name__ == '__main__':
     # Progress bar
     with tqdm(total=number_of_episodes, desc="Training Progress") as pbar:
         for _ in range(number_of_episodes):
-           
-
             # Simulate environment to track cumulative rewards
             obs = vec_env.reset()  # Reset the environment
             done = False
             cumulative_reward = 0  # Reset reward for new episode
             number_of_steps = 0
-            
+
             while not done and number_of_steps<max_number_of_steps:
-                
+
                 model.learn(total_timesteps=1, reset_num_timesteps=False)
                 number_of_steps+=1
                 action, _ = model.predict(obs, deterministic=True)
