@@ -141,9 +141,11 @@ class TrainEnv(gym.Env):
         self.set_itineraire(train_id, it_id)
 
         if not self.is_it_incompatible(train_id, it_id) and not self.is_quaie_interdit(train_id, it_id):
-            reward = -1.0
+            reward = -self.contraintes_itineraire(train_id, it_id) / 100.0
+            
+        
         else:
-            reward = self.contraintes_itineraire(train_id, it_id) / 100.0
+            reward = -20
 
         self.done = all(self.itineraire)
 
@@ -183,7 +185,7 @@ class TrainEnv(gym.Env):
         :param it_id: Vérifier la conformité de l'itinéraire avec le train (sens_depart et Voie_a_quai)
         :return : True si l'itineraire est incompatible, False (=self.done) sinon
         """
-        if it_id is len(self.list_it):
+        if it_id == len(self.list_it):
             return self.done
         else:
             sens_depart_it = self.list_it.loc[it_id, "sensDepart"]
@@ -232,7 +234,7 @@ class TrainEnv(gym.Env):
 
     def contraintes_itineraire(self, train_id, it_id):
         if it_id == len(self.list_it):
-            return 0
+            return -1
         c = 0
         num_train = self.trains.loc[train_id, "id"]
         index_to_check = self.contraintes[self.contraintes[[0, 1]] == [num_train, it_id]][[0, 1]].dropna().index.tolist()
@@ -250,8 +252,7 @@ class TrainEnv(gym.Env):
                 c += self.contraintes.loc[ind, 4]
         return c
 
-    def any_itineraire(self):
-        return 1e3 * np.sum(self.itineraire==None)
+    
 
 
 if __name__ == '__main__':
@@ -268,8 +269,8 @@ if __name__ == '__main__':
     vec_env = DummyVecEnv([lambda: env])
 
     # Étape 4 : Créer et entraîner le modèle DQN
-    model = DQN("MlpPolicy", vec_env, verbose=0, learning_rate=1e-3, buffer_size=10000)
-    total_timesteps=100000
+    model = DQN("MlpPolicy", vec_env, verbose=0, learning_rate=1e-3, buffer_size=2000)
+    total_timesteps=5000
 
     # Progress bar
     with tqdm(total=total_timesteps, desc="Training Progress") as pbar:
