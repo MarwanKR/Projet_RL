@@ -6,7 +6,10 @@ from more_itertools import collapse
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
-
+from stable_baselines3 import DQN,PPO
+from stable_baselines3.common.env_checker import check_env
+from stable_baselines3.common.vec_env import DummyVecEnv
+from tqdm import tqdm 
 
 class TrainEnv(gym.Env):
     def __init__(self, file_path):
@@ -47,27 +50,25 @@ class TrainEnv(gym.Env):
         self.itineraire_dict = {str(itineraire): idx for idx, itineraire in enumerate(self.list_it)}
 
         # Définir l'espace d'action et d'observation
-        self.action_space = spaces.Tuple((
-            spaces.Discrete(self.number_of_trains),  # ID du train
-            spaces.Discrete(len(self.list_it))  # ID de l'itinéraire
-        ))
+        self.action_space = spaces.Discrete(self.number_of_trains*len(self.list_it))
 
         # Modifié pour accepter des indices d'itinéraires (entiers)
-        self.observation_space = spaces.Dict({
-            "sens_depart": spaces.MultiBinary(self.number_of_trains),
-            "voie_en_ligne": spaces.Box(low=np.zeros(self.number_of_trains),
-                                        high=np.ones(self.number_of_trains) * (len(self.voie_en_ligne)-1),
-                                        dtype=np.int32),
-            "type_circulation": spaces.Box(low=np.zeros(self.number_of_trains),
-                                           high=np.ones(self.number_of_trains) * (len(self.type_circulation)-1),
-                                           dtype=np.int32),
-            "types_materiels": spaces.Box(low=np.zeros(self.number_of_trains),
-                                           high=np.ones(self.number_of_trains) * (len(self.types_materiels)-1),
-                                           dtype=np.int32),
-            "itineraire": spaces.Box(low=np.zeros(self.number_of_trains),
-                                     high=np.ones(self.number_of_trains) * (len(self.list_it)-1),
-                                     dtype=np.int32)
-        })
+        # self.observation_space = spaces.Dict({
+        #     "sens_depart": spaces.MultiBinary(self.number_of_trains),
+        #     "voie_en_ligne": spaces.Box(low=np.zeros(self.number_of_trains),
+        #                                 high=np.ones(self.number_of_trains) * (len(self.voie_en_ligne)-1),
+        #                                 dtype=np.int32),
+        #     "type_circulation": spaces.Box(low=np.zeros(self.number_of_trains),
+        #                                    high=np.ones(self.number_of_trains) * (len(self.type_circulation)-1),
+        #                                    dtype=np.int32),
+        #     "types_materiels": spaces.Box(low=np.zeros(self.number_of_trains),
+        #                                    high=np.ones(self.number_of_trains) * (len(self.types_materiels)-1),
+        #                                    dtype=np.int32),
+        #     "itineraire": spaces.Box(low=np.zeros(self.number_of_trains),
+        #                              high=np.ones(self.number_of_trains) * (len(self.list_it)-1),
+        #                              dtype=np.int32)
+        # })
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(self.number_of_trains * 5,), dtype=np.float64)
 
         self.state = None
 
@@ -94,49 +95,76 @@ class TrainEnv(gym.Env):
         return values
 
     def _get_obs(self):
-        if self.state is None:
-            voieEnLigne = np.array([self.voie_en_ligne.index(i) for i in self.trains["voieEnLigne"]], dtype=np.int32)
-            type_circulation = np.array([self.type_circulation.index(i) for i in self.trains["typeCirculation"]],
-                                        dtype=np.int32)
-            types_materiels = np.array([self.types_materiels.index(i[0]) for i in self.trains["typesMateriels"]],
-                                       dtype=np.int32)
-        else:
-            voieEnLigne = self.state["voie_en_ligne"]
-            type_circulation = self.state["type_circulation"]
-            types_materiels = self.state["types_materiels"]
-        dict = {
-            "sens_depart": np.array(self.sens_depart, dtype=np.int32),
-            "voie_en_ligne": voieEnLigne,
-            "type_circulation": type_circulation,
-            "types_materiels": types_materiels,
-            "itineraire": self.itineraire
-        }
-        return dict
+        # if self.state is None:
+        #     voieEnLigne = np.array([self.voie_en_ligne.index(i) for i in self.trains["voieEnLigne"]], dtype=np.int32)
+        #     type_circulation = np.array([self.type_circulation.index(i) for i in self.trains["typeCirculation"]],
+        #                                 dtype=np.int32)
+        #     types_materiels = np.array([self.types_materiels.index(i[0]) for i in self.trains["typesMateriels"]],
+        #                                dtype=np.int32)
+        # else:
+        #     voieEnLigne = self.state["voie_en_ligne"]
+        #     type_circulation = self.state["type_circulation"]
+        #     types_materiels = self.state["types_materiels"]
+        # obs = {
+        #     "sens_depart": np.array(self.sens_depart, dtype=np.int32),
+        #     "voie_en_ligne": voieEnLigne,
+        #     "type_circulation": type_circulation,
+        #     "types_materiels": types_materiels,
+        #     "itineraire": self.itineraire
+        # }
+        #return obs
+        voieEnLigne = np.array([self.voie_en_ligne.index(i) for i in self.trains["voieEnLigne"]], dtype=np.int32)
+        type_circulation = np.array([self.type_circulation.index(i) for i in self.trains["typeCirculation"]],
+                                    dtype=np.int32)
+        types_materiels = np.array([self.types_materiels.index(i[0]) for i in self.trains["typesMateriels"]],
+                                dtype=np.int32)
+        obs = np.concatenate((
+        np.array(self.sens_depart, dtype=np.float32),
+        voieEnLigne,
+        type_circulation,
+        types_materiels,
+        np.array(self.itineraire, dtype=np.float32)))
+        return obs
+
+        
 
     def reset(self,seed=None, options = None):
         self.np_random, seed = gym.utils.seeding.np_random(seed)
         self.itineraire = np.copy(self.itineraire_default)
-        print(self.itineraire, "dans reset")
+        
         self.done = False
         self.state = self._get_obs()
         # print(self.state["itineraire"].shape,"dans reset")
         return self.state, {}
 
     def step(self, action):
-        train_id, it_id = action
+        train_id, it_id =  np.unravel_index(action, (self.number_of_trains, len(self.list_it)))
+
+        train_id, it_id = np.unravel_index(action, (self.number_of_trains, len(self.list_it)))
         self.set_itineraire(train_id, it_id)
 
-        if self.is_it_compatible(train_id, it_id):
-            reward = -1e8
-        elif self.is_quaie_interdit(train_id, it_id):
-            reward = -1e8
+        if self.is_it_compatible(train_id, it_id) or self.is_quaie_interdit(train_id, it_id):
+            reward = -1.0
         else:
-            reward = self.contraintes_itineraire(train_id, it_id)
-            reward += self.any_itineraire()
-        
+            reward = self.contraintes_itineraire(train_id, it_id) / 100.0
+
         self.done = all(self.itineraire)
 
-        return self.state, reward, self.done, False, {}
+        return self._get_obs(), reward, self.done, False,{}
+        # self.set_itineraire(train_id, it_id)
+
+        # if self.is_it_compatible(train_id, it_id):
+        #     reward = -1e8
+        # elif self.is_quaie_interdit(train_id, it_id):
+        #     reward = -1e8
+        # else:
+        #     reward = self.contraintes_itineraire(train_id, it_id)
+        #     reward += self.any_itineraire()
+        
+        # self.done = all(self.itineraire)
+
+        # return self.state, reward, self.done, False, {}
+
 
     def render(self, mode='human'):
         print("Current State:")
@@ -224,16 +252,37 @@ class TrainEnv(gym.Env):
         return c
 
     def any_itineraire(self):
-        return 1e3 * self.itineraire.count(None)
+        return 1e3 * np.sum(self.itineraire==None)
 
 
 if __name__ == '__main__':
     # Exemple d'utilisation
     file_path = "instances/Asmall.json"
-    trains = TrainEnv(file_path)
+    env = TrainEnv(file_path)
 
-    from gymnasium.utils.env_checker import check_env
-    check_env(trains, warn=True)
+    
+    check_env(env)
     # Afficher les données
-    # dep = trains.get_sens_depart()
-    # print(dep)
+    dep = env.sens_depart
+    print(dep,"sens des départs")
+    # Étape 3 : Vectoriser l'environnement
+    vec_env = DummyVecEnv([lambda: env])
+
+    # Étape 4 : Créer et entraîner le modèle DQN
+    model = DQN("MlpPolicy", vec_env, verbose=0,learning_rate=1e-3,buffer_size=10000)
+    total_timesteps=100000
+
+    # Progress bar
+    with tqdm(total=total_timesteps, desc="Training Progress") as pbar:
+        for _ in range(total_timesteps):
+            model.learn(total_timesteps=1, reset_num_timesteps=False)
+            pbar.update(1)
+    # Étape 5 : Tester le modèle
+    obs = vec_env.reset()
+    for _ in range(1000):
+        action, _ = model.predict(obs, deterministic=True)
+        obs, reward, done, info = vec_env.step(action)
+        print(reward,end=" ;")
+        # vec_env.render()
+        if done:
+            obs = vec_env.reset()
