@@ -10,7 +10,7 @@ from stable_baselines3 import DQN,PPO
 from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.vec_env import DummyVecEnv
 from tqdm import tqdm 
-
+import matplotlib.pyplot as plt
 
 class TrainEnv(gym.Env):
     def __init__(self, file_path):
@@ -141,14 +141,16 @@ class TrainEnv(gym.Env):
         self.set_itineraire(train_id, it_id)
 
         if not self.is_it_incompatible(train_id, it_id) and not self.is_quaie_interdit(train_id, it_id):
-            reward = -self.contraintes_itineraire(train_id, it_id) / 100.0
+            reward = -self.contraintes_itineraire(train_id, it_id) / 1000.0
+            if reward>0 : 
+                print("reward = ", reward)
             
         
         else:
-            reward = -20
-
-        self.done = all(self.itineraire)
-
+            reward = -30
+            
+        # self.done = all(self.itineraire)
+        
         return self._get_obs(), reward, self.done, False,{}
         # self.set_itineraire(train_id, it_id)
 
@@ -189,7 +191,7 @@ class TrainEnv(gym.Env):
             return self.done
         else:
             sens_depart_it = self.list_it.loc[it_id, "sensDepart"]
-            voieAQuai_it = self.list_it.loc[it_id, "voieAQuai"]
+            voieAQuai_it = self.list_it.loc[it_id, "voieEnLigne"]
             sens_depart_train = self.trains.loc[train_id, "sensDepart"]
             voieAQuai_train = self.trains.loc[train_id, "voieAQuai"]
             if sens_depart_train == sens_depart_it and voieAQuai_train == voieAQuai_it:
@@ -234,7 +236,7 @@ class TrainEnv(gym.Env):
 
     def contraintes_itineraire(self, train_id, it_id):
         if it_id == len(self.list_it):
-            return -1
+            return 1
         c = 0
         num_train = self.trains.loc[train_id, "id"]
         index_to_check = self.contraintes[self.contraintes[[0, 1]] == [num_train, it_id]][[0, 1]].dropna().index.tolist()
@@ -256,33 +258,61 @@ class TrainEnv(gym.Env):
 
 
 if __name__ == '__main__':
-    # Exemple d'utilisation
-    file_path = "instances/Asmall.json"
+    # Example usage
+    random_seed = 10
+    file_path = "instances/inst_A.json"
     env = TrainEnv(file_path)
 
-    
     check_env(env)
-    # Afficher les données
+    # Display data
     dep = env.sens_depart
     print(dep, "sens des départs")
-    # Étape 3 : Vectoriser l'environnement
+    
+    # Step 3: Vectorize the environment
     vec_env = DummyVecEnv([lambda: env])
 
-    # Étape 4 : Créer et entraîner le modèle DQN
-    model = DQN("MlpPolicy", vec_env, verbose=0, learning_rate=1e-3, buffer_size=2000)
-    total_timesteps=5000
-
+    # Step 4: Create and train the DQN model
+    model = DQN("MlpPolicy", vec_env, verbose=0, learning_rate=1e-3, buffer_size=800,seed=random_seed)
+    number_of_episodes = 2100
+    max_number_of_steps = 100
+    # Tracking cumulative rewards
+    episode_rewards = []  # List to store total reward per episode
+    cumulative_reward = 0  # Cumulative reward for the current episode
+    track_number_of_steps = []
     # Progress bar
-    with tqdm(total=total_timesteps, desc="Training Progress") as pbar:
-        for _ in range(total_timesteps):
-            model.learn(total_timesteps=1, reset_num_timesteps=False)
+    with tqdm(total=number_of_episodes, desc="Training Progress") as pbar:
+        for _ in range(number_of_episodes):
+           
+
+            # Simulate environment to track cumulative rewards
+            obs = vec_env.reset()  # Reset the environment
+            done = False
+            cumulative_reward = 0  # Reset reward for new episode
+            number_of_steps = 0
+            
+            while not done and number_of_steps<max_number_of_steps:
+                
+                model.learn(total_timesteps=1, reset_num_timesteps=False)
+                number_of_steps+=1
+                action, _ = model.predict(obs, deterministic=True)
+                obs, reward, done, info = vec_env.step(action)
+                cumulative_reward =  reward +cumulative_reward*0.95  # Accumulate rewards
+            track_number_of_steps.append(number_of_steps)
+            episode_rewards.append(cumulative_reward)  # Log reward for this episode
             pbar.update(1)
-    # Étape 5 : Tester le modèle
-    obs = vec_env.reset()
-    for _ in range(1000):
-        action, _ = model.predict(obs, deterministic=True)
-        obs, reward, done, info = vec_env.step(action)
-        print(reward, end=" ;")
-        # vec_env.render()
-        if done:
-            obs = vec_env.reset()
+
+    # Plot the evolution of expected return
+    plt.figure(figsize=(10, 6))
+    plt.plot(episode_rewards, label="Cumulative Reward")
+    plt.xlabel("Episode")
+    plt.ylabel("Cumulative Reward")
+    plt.title("Evolution of Expected Return During Training")
+    plt.legend()
+    plt.figure(figsize=(10, 6))
+    plt.plot(track_number_of_steps, label="number of steps")
+    plt.xlabel("Episode")
+    plt.ylabel("number of steps")
+    plt.title("Evolution of number of steps before done")
+    plt.legend()
+    plt.grid()
+    plt.show()
