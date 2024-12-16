@@ -11,6 +11,7 @@ from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.vec_env import DummyVecEnv
 from tqdm import tqdm 
 
+
 class TrainEnv(gym.Env):
     def __init__(self, file_path):
         super(TrainEnv, self).__init__()
@@ -50,7 +51,7 @@ class TrainEnv(gym.Env):
         self.itineraire_dict = {str(itineraire): idx for idx, itineraire in enumerate(self.list_it)}
 
         # Définir l'espace d'action et d'observation
-        self.action_space = spaces.Discrete(self.number_of_trains*len(self.list_it))
+        self.action_space = spaces.Discrete(self.number_of_trains*(len(self.list_it)+1))
 
         # Modifié pour accepter des indices d'itinéraires (entiers)
         # self.observation_space = spaces.Dict({
@@ -126,9 +127,7 @@ class TrainEnv(gym.Env):
         np.array(self.itineraire, dtype=np.float32)))
         return obs
 
-        
-
-    def reset(self,seed=None, options = None):
+    def reset(self, seed=None, options=None):
         self.np_random, seed = gym.utils.seeding.np_random(seed)
         self.itineraire = np.copy(self.itineraire_default)
         
@@ -138,12 +137,10 @@ class TrainEnv(gym.Env):
         return self.state, {}
 
     def step(self, action):
-        train_id, it_id =  np.unravel_index(action, (self.number_of_trains, len(self.list_it)))
-
-        train_id, it_id = np.unravel_index(action, (self.number_of_trains, len(self.list_it)))
+        train_id, it_id = np.unravel_index(action, (self.number_of_trains, (len(self.list_it)+1)))
         self.set_itineraire(train_id, it_id)
 
-        if self.is_it_compatible(train_id, it_id) or self.is_quaie_interdit(train_id, it_id):
+        if not self.is_it_incompatible(train_id, it_id) and not self.is_quaie_interdit(train_id, it_id):
             reward = -1.0
         else:
             reward = self.contraintes_itineraire(train_id, it_id) / 100.0
@@ -178,7 +175,7 @@ class TrainEnv(gym.Env):
         self.itineraire[train_id] = new_itineraire
     
     # Implémentation des vérifications et contraintes existantes...
-    def is_it_compatible(self, train_id, it_id):
+    def is_it_incompatible(self, train_id, it_id):
         """
         Met done à true si l'itineraire qu'on propose n'est pas compatible avec le train.
 
@@ -186,7 +183,7 @@ class TrainEnv(gym.Env):
         :param it_id: Vérifier la conformité de l'itinéraire avec le train (sens_depart et Voie_a_quai)
         :return : True si l'itineraire est incompatible, False (=self.done) sinon
         """
-        if it_id is None:
+        if it_id is len(self.list_it):
             return self.done
         else:
             sens_depart_it = self.list_it.loc[it_id, "sensDepart"]
@@ -209,7 +206,7 @@ class TrainEnv(gym.Env):
         :param types_interdit: Liste des types de circulations interdites.
         :return: True si le quai est interdit pour ce train, False sinon.
         """
-        if len(self.quai_interdits) == 0:
+        if len(self.quai_interdits) == 0 or it_quai == len(self.list_it):
             return self.done
 
         ligne = self.trains.loc[train_id, 'voieEnLigne']
@@ -234,6 +231,8 @@ class TrainEnv(gym.Env):
         return self.done
 
     def contraintes_itineraire(self, train_id, it_id):
+        if it_id == len(self.list_it):
+            return 0
         c = 0
         num_train = self.trains.loc[train_id, "id"]
         index_to_check = self.contraintes[self.contraintes[[0, 1]] == [num_train, it_id]][[0, 1]].dropna().index.tolist()
@@ -264,12 +263,12 @@ if __name__ == '__main__':
     check_env(env)
     # Afficher les données
     dep = env.sens_depart
-    print(dep,"sens des départs")
+    print(dep, "sens des départs")
     # Étape 3 : Vectoriser l'environnement
     vec_env = DummyVecEnv([lambda: env])
 
     # Étape 4 : Créer et entraîner le modèle DQN
-    model = DQN("MlpPolicy", vec_env, verbose=0,learning_rate=1e-3,buffer_size=10000)
+    model = DQN("MlpPolicy", vec_env, verbose=0, learning_rate=1e-3, buffer_size=10000)
     total_timesteps=100000
 
     # Progress bar
@@ -282,7 +281,7 @@ if __name__ == '__main__':
     for _ in range(1000):
         action, _ = model.predict(obs, deterministic=True)
         obs, reward, done, info = vec_env.step(action)
-        print(reward,end=" ;")
+        print(reward, end=" ;")
         # vec_env.render()
         if done:
             obs = vec_env.reset()
