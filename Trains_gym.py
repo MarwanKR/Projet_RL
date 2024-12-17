@@ -1,5 +1,5 @@
-#test avec gym 
-
+#test avec gym
+import copy
 import json
 import pandas as pd
 from more_itertools import collapse
@@ -23,6 +23,10 @@ class TrainEnv(gym.Env):
         df_flat = pd.json_normalize(df_trains[0])
         df_flat['sensDepart'] = df_flat['sensDepart']*1
 
+        self.trains = df_flat  # Dataframe des trains
+        # self.trains.index = self.id
+        self.list_it = pd.DataFrame(data['itineraires'])  # Dataframe des itinéraires
+
         self.id = df_flat['id'].tolist()
         self.number_of_trains = len(self.id)
         self.sens_depart = list(collapse(df_flat['sensDepart'].tolist()))
@@ -31,21 +35,23 @@ class TrainEnv(gym.Env):
         self.types_materiels = list(set(collapse(df_flat['typesMateriels'].tolist())))
 
         self.contraintes = pd.DataFrame(data['contraintes'])
-        self.itineraire = [-1 for _ in range(self.number_of_trains)]  # Initialisation avec -1
+        self.itineraire = [len(self.list_it) for _ in range(self.number_of_trains)]  # Initialisation avec -1
         print(self.itineraire, "dans init")
 
         values = self._init_quai_interdit(data)
         self.quai_interdits = pd.DataFrame(values, columns=["voiesAQuaiInterdites", "voiesEnLigne", "typesMateriels",
                                                             "typesCirculation"])  # Dataframe des quais interdits
-
         self.done = False
 
-        self.trains = df_flat  # Dataframe des trains
-        # self.trains.index = self.id
-        self.list_it = pd.DataFrame(data['itineraires'])  # Dataframe des itinéraires
-
-        self.itineraire_default = np.array([int(self.list_it[(self.list_it[["sensDepart", "voieEnLigne", "voieAQuai"]]
-        == self.trains.iloc[i, [1, 2, 3]]).all(1)].iloc[0, 0]) for i in range(self.number_of_trains)], dtype=np.int32)
+        # Construction de l'itinéaire par défault fournit par la SNCF
+        array = []
+        for i in range(self.number_of_trains):
+            try:
+                ind = int(self.list_it[(self.list_it[["sensDepart", "voieEnLigne", "voieAQuai"]] == self.trains.iloc[i, [1, 2, 3]]).all(1)].iloc[0, 0])
+            except IndexError:  # L'itinéraire attribué est inéxistant/incompatible
+                ind = len(self.list_it)
+            array.append(ind)
+        self.itineraire_default = np.array(array, dtype=np.int32)
 
         # Créer un dictionnaire pour l'encodage des itinéraires en indices
         self.itineraire_dict = {str(itineraire): idx for idx, itineraire in enumerate(self.list_it)}
@@ -72,6 +78,11 @@ class TrainEnv(gym.Env):
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(self.number_of_trains * 5,), dtype=np.float64)
 
         self.state = None
+
+        self.render_mode = 'human'
+        self.last_it = self.itineraire
+        self.cost = 0
+        self.first_cost = self._get_info(reset=True)['cost_config']
 
     def _init_quai_interdit(self, data):
         df_quai_interdits = pd.DataFrame(data['interdictionsQuais'])
@@ -127,12 +138,30 @@ class TrainEnv(gym.Env):
         np.array(self.itineraire, dtype=np.float32)))
         return obs
 
+    def _get_info(self, train=None, it=None, reset=False):
+        if reset:
+            cost = 0
+            if self.done:
+                return {'cost_config': -30}
+            for train in range(self.number_of_trains):
+                cost -= self.contraintes_itineraire(train, self.itineraire[train])
+        else:
+            last_cost = self.cost
+            cost = last_cost - self.contraintes_itineraire(train, self.last_it[train])
+            cost += self.contraintes_itineraire(train, it)
+            if cost == 0:
+                print(f'itinéraire :{self.itineraire}')
+        return {'cost_config': cost}
+
     def reset(self, seed=None, options=None):
         self.np_random, seed = gym.utils.seeding.np_random(seed)
-        self.itineraire = np.copy(self.itineraire_default)
+        self.itineraire = [len(self.list_it) for _ in range(self.number_of_trains)]
+        # self.itineraire = np.copy(self.itineraire_default)  # Itinéraire de la SNCF par défaut
+        self.last_it = np.copy(self.itineraire)
         
         self.done = False
         self.state = self._get_obs()
+        self.cost = self.first_cost
         # print(self.state["itineraire"].shape,"dans reset")
         return self.state, {}
 
@@ -142,13 +171,15 @@ class TrainEnv(gym.Env):
 
         if not self.is_it_incompatible(train_id, it_id) and not self.is_quaie_interdit(train_id, it_id):
             reward = -self.contraintes_itineraire(train_id, it_id) / 1000.0
+            info = self._get_info(train_id, it_id)
         
         else:
             reward = -30
+            info = {'cost_config': -30}
 
         # self.done = all(self.itineraire)
 
-        return self._get_obs(), reward, self.done, False,{}
+        return self._get_obs(), reward, self.done, False, info
         # self.set_itineraire(train_id, it_id)
 
         # if self.is_it_compatible(train_id, it_id):
@@ -169,7 +200,7 @@ class TrainEnv(gym.Env):
         cost = 0
         for train in range(self.number_of_trains):
             if self.done:
-                return -700
+                return -30
             cost -= self.contraintes_itineraire(train, self.itineraire[train])
         return cost
 
@@ -179,6 +210,7 @@ class TrainEnv(gym.Env):
 
     # Méthodes existantes adaptées
     def set_itineraire(self, train_id, new_itineraire):
+        self.last_it = np.copy(self.itineraire)
         self.itineraire[train_id] = new_itineraire
     
     # Implémentation des vérifications et contraintes existantes...
@@ -246,7 +278,7 @@ class TrainEnv(gym.Env):
         for ind in index_to_check:
             train = self.contraintes.loc[ind, 2]
             it = self.contraintes.loc[ind, 3]
-            if it == self.itineraire[self.id.index(train)]:
+            if train in self.id and it == self.itineraire[self.id.index(train)]:
                 c += self.contraintes.loc[ind, 4]
 
         index_to_check = self.contraintes[self.contraintes[[2, 3]] == [num_train, it_id]][[2, 3]].dropna().index.tolist()
@@ -260,8 +292,6 @@ class TrainEnv(gym.Env):
                 pass
         return c
 
-    
-
 
 if __name__ == '__main__':
     # Example usage
@@ -269,7 +299,7 @@ if __name__ == '__main__':
     file_path = "instances/inst_A.json"
     env = TrainEnv(file_path)
 
-    check_env(env)
+    # check_env(env)
     # Display data
     dep = env.sens_depart
     print(dep, "sens des départs")
@@ -278,12 +308,14 @@ if __name__ == '__main__':
     vec_env = DummyVecEnv([lambda: env])
 
     # Step 4: Create and train the DQN model
-    model = DQN("MlpPolicy", vec_env, verbose=0, learning_rate=1e-3, buffer_size=800,seed=random_seed)
-    number_of_episodes = 300
-    max_number_of_steps = 100
+    model = DQN("MlpPolicy", vec_env, verbose=0, learning_rate=1e-3, buffer_size=800, seed=random_seed)
+    number_of_episodes = 150
+    max_number_of_steps = 30
     # Tracking cumulative rewards
     episode_rewards = []  # List to store total reward per episode
+    episode_rewards2 = []
     cumulative_reward = 0  # Cumulative reward for the current episode
+    cumulative_reward2 = 0
     track_number_of_steps = []
     # Progress bar
     with tqdm(total=number_of_episodes, desc="Training Progress") as pbar:
@@ -292,22 +324,27 @@ if __name__ == '__main__':
             obs = vec_env.reset()  # Reset the environment
             done = False
             cumulative_reward = 0  # Reset reward for new episode
+            cumulative_reward2 = 0
             number_of_steps = 0
 
             while not done and number_of_steps<max_number_of_steps:
-
                 model.learn(total_timesteps=1, reset_num_timesteps=False)
-                number_of_steps+=1
+                number_of_steps += 1
                 action, _ = model.predict(obs, deterministic=True)
                 obs, reward, done, info = vec_env.step(action)
-                cumulative_reward =  reward +cumulative_reward*0.95  # Accumulate rewards
+                cumulative_reward2 += info[0]['cost_config']  # Accumulate rewards
+                cumulative_reward = reward + cumulative_reward*0.95  # Accumulate rewards
+                if not done:
+                    pass
             track_number_of_steps.append(number_of_steps)
             episode_rewards.append(cumulative_reward)  # Log reward for this episode
+            episode_rewards2.append(cumulative_reward2)
             pbar.update(1)
 
     # Plot the evolution of expected return
     plt.figure(figsize=(10, 6))
     plt.plot(episode_rewards, label="Cumulative Reward")
+    plt.plot(episode_rewards2, label="Total cost")
     plt.xlabel("Episode")
     plt.ylabel("Cumulative Reward")
     plt.title("Evolution of Expected Return During Training")
