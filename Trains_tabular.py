@@ -31,16 +31,16 @@ class Environnment :
                 # Check conditions for adding an itinerary to the train's action space
                 if itinerary["sensDepart"] * 1 == train["sensDepart"] and itinerary["voieEnLigne"] == train["voieEnLigne"]:
                     train_action_space.append(itinerary)
-
+            if (train_action_space==[]) : 
+                print("train sans action space",train)
             self.action_spaces[train["id"]] = train_action_space
 
         self.state_space = self.trains["id"]
         self.assigned_itineraries = {}
         self.current_state_index = 0
         self.current_state = self.state_space[0] #id du train actuel
-        print("current state init",self.current_state)
-        print(self.state_space[1],"deuxième state")
-        self.past_state = None #id du train traité précédemment
+        
+        
         self.Q_values = {}
         self.number_of_visits = {}
         for state in self.state_space :
@@ -48,9 +48,10 @@ class Environnment :
             for action in self.action_spaces[state]:
                 self.Q_values[(state,action["id"])]= 0
                 self.number_of_visits[(state,action["id"])] = 0
-
+            self.Q_values[(state,len(self.list_it))] = 0  #pour le cas ou on met le train de côté car action_space est vide
+            self.number_of_visits[(state,len(self.list_it))] = 0
         self.cost = -self.number_of_trains*500
-        print("assigned itineraries init",self.assigned_itineraries)
+        
 
     def _init_quai_interdit(self, data):
         df_quai_interdits = pd.DataFrame(data['interdictionsQuais'])
@@ -80,11 +81,14 @@ class Environnment :
 
     def select_action(self,state):
         action_space = self.action_spaces[state]
+        if action_space==[] : 
+            return len(self.list_it)
         epsilon = np.random.random()
         if epsilon <= 0.05:
             return np.random.choice([action["id"] for action in action_space])
         # Vectorized max selection
         q_values = np.array([self.Q_values[(state, action["id"])] for action in action_space])
+
         max_index = np.argmax(q_values)
         return action_space[max_index]["id"]
     
@@ -177,10 +181,12 @@ class Environnment :
         
     
     def get_total_cost_of_config(self):
+        timestamp1 = time.time()
         cost = 0
         for train_id in self.trains["id"]:
             it_id = self.assigned_itineraries[train_id]
             cost+=self.contraintes_itineraire(train_id,it_id)/100
+        print(time.time()-timestamp1,"temps pour calcul cost")
         return -cost
     def reset(self):
         self.done = False 
@@ -216,7 +222,7 @@ class Environnment :
 
 
 if __name__ == '__main__':
-    env = Environnment('instances/inst_NS.json')
+    env = Environnment(r'C:\Users\cocor\Documents\CoursPolyMontreal\Reinforcement Learning\projet\sujet4\instances\inst_PE.json')
     env.print_env()
 
     results = env.train_model(201)
