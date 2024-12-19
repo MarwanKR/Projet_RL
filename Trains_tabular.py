@@ -206,7 +206,7 @@ class Environnment :
         for i in range(number_of_episodes):
             while not self.done:
                 self.step()
-            print(i)
+            
             if self.cost==0 : 
                 print("assignation optimale")
                 print(self.assigned_itineraries)
