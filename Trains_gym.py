@@ -26,6 +26,7 @@ class TrainEnv(gym.Env):
         # Dataframes
         self.trains = df_flat  # Dataframe des trains
         self.list_it = pd.DataFrame(data['itineraires'])  # Dataframe des itinéraires
+        self.list_it['sensDepart'] = self.list_it['sensDepart']*1
         self.contraintes = pd.DataFrame(data['contraintes'])
         values = self._init_quai_interdit(data)
         self.quai_interdits = pd.DataFrame(values, columns=["voiesAQuaiInterdites", "voiesEnLigne", "typesMateriels",
@@ -63,21 +64,26 @@ class TrainEnv(gym.Env):
         # Construction dictionnaire des itinéraires compatibles
         self.dict_it = {}
         self.len_compatible_it = []
-        for train_id in range(self.number_of_trains):
-            compatible = []
-            for it_id in range(len(self.list_it)):
-                is_incompatible = self.is_it_incompatible(train_id, it_id)
-                is_interdit = self.is_quaie_interdit(train_id, it_id)
-                if not is_incompatible and not is_interdit:
-                    compatible.append(it_id)
-            assert len(compatible) > 0, f"Le train {train_id} n'admet aucun itinéraire compatible"
-            self.dict_it[train_id] = compatible
-            self.len_compatible_it.append(len(compatible))
+        with tqdm(total=self.number_of_trains, desc="Initialize Progress") as pbar:
+            for train_id in range(self.number_of_trains):
+                compatible = self.list_it[(self.list_it[['sensDepart', 'voieEnLigne']] == self.trains.loc[
+                    train_id, ['sensDepart', 'voieEnLigne']].to_list()).all(1)].index.tolist()
+                correct = []
+                while compatible:
+                    it_id = compatible.pop(0)
+                    if not self.is_quaie_interdit(train_id, it_id):
+                        correct.append(it_id)
+                assert len(correct) > 0, f"Le train {train_id} n'admet aucun itinéraire compatible et autorisé"
+                self.dict_it[train_id] = correct
+                self.len_compatible_it.append(len(correct))
+                pbar.update(1)
 
 
         # Action-space
         # self.max_it = max(self.len_compatible_it)
-        self.itineraire = [len(self.list_it) for _ in range(self.number_of_trains)]  # Initialisation avec None
+        self.itineraire = {}
+        for train_id in range(self.number_of_trains):
+            self.itineraire[train_id] = len(self.list_it)  # Initialisation avec None
         print(self.itineraire, "dans init")
 
         # Définir l'espace d'action et d'observation
@@ -89,7 +95,7 @@ class TrainEnv(gym.Env):
         self.render_mode = 'human'
         self.last_it = self.itineraire
         self.cost = 0
-        self.first_cost = self._get_info(reset=True)['cost_config']
+        self.first_cost = 0 # self._get_info(reset=True)['cost_config']
 
     def _init_quai_interdit(self, data):
         df_quai_interdits = pd.DataFrame(data['interdictionsQuais'])
@@ -114,29 +120,29 @@ class TrainEnv(gym.Env):
         return values
 
     def _get_obs(self):
-        # num_train = self.current_id[self.current_step]
-        # obs = self.id.index(num_train)
-        return self.current_step
+        if not self.done:
+            num_train = self.current_id[self.current_step]
+            obs = self.id.index(num_train)
+        else:
+            obs = self.current_step
+        return obs
 
-    def _get_info(self, train=None, it=None, reset=False):
-        # if reset:
-        cost = 0
-        for train in range(self.number_of_trains):
-            cost -= self.contraintes_itineraire(train, self.itineraire[train])
-        self.cost = cost
-        # else:
-        #     last_cost = self.cost
-        #     self.cost = last_cost + self.contraintes_itineraire(train, self.last_it[train])
-        #     self.cost -= self.contraintes_itineraire(train, it)
-        #     if self.cost == 0:
-        #         print(f'itinéraire :{self.itineraire}')
-        return {'cost_config': self.cost, 'itineraire': self.itineraire}
+    def _get_info(self, do=False):
+        info = {'itineraire': list(self.itineraire.values())}
+        if do:
+            cost = 0
+            for train in range(self.number_of_trains):
+                cost -= self.contraintes_itineraire(train, self.itineraire[train])
+            self.cost = cost
+            info = {'cost_config': self.cost, 'itineraire': list(self.itineraire.values())}
+        return info
 
     def reset(self, seed=None, options=None):
         self.np_random, seed = gym.utils.seeding.np_random(seed)
         self.current_step = 0
-        # np.random.shuffle(self.current_id)
-        self.itineraire = [len(self.list_it) for _ in range(self.number_of_trains)]  # Itinéraire de la SNCF par défaut
+        np.random.shuffle(self.current_id)
+        for train_id in range(self.number_of_trains):
+            self.itineraire[train_id] = len(self.list_it)  # Itinéraire de la SNCF par défaut
         self.last_it = np.copy(self.itineraire)
         
         self.done = False
@@ -149,20 +155,21 @@ class TrainEnv(gym.Env):
         train_id = self._get_obs()
         it_id = self.dict_it[train_id][action % self.len_compatible_it[train_id]]
         self.set_itineraire(train_id, it_id)
+        reward = -self.contraintes_itineraire(train_id, it_id)
+        info = {}
+        # print(self.current_step)
+        # if not self.is_it_incompatible(train_id, it_id) and not self.is_quaie_interdit(train_id, it_id):
 
-        if not self.is_it_incompatible(train_id, it_id) and not self.is_quaie_interdit(train_id, it_id):
-            reward = -self.contraintes_itineraire(train_id, it_id)
-            info = {}
 
-        else:
-            self.done = True
-            reward = -20000
-            info = {'cost_config': 100, 'itineraire': self.itineraire}
+        # else:
+        #     self.done = True
+        #     reward = -20000
+        #     info = {'cost_config': 100, 'itineraire': self.itineraire}
 
         self.current_step += 1
         if self.current_step == self.number_of_trains:
             self.done = True
-            info = self._get_info()
+            info = self._get_info(do=True)
         return self._get_obs(), reward, self.done, False, info
 
     def render(self, mode='human'):
@@ -221,7 +228,7 @@ class TrainEnv(gym.Env):
 
         ligne = self.trains.loc[train_id, 'voieEnLigne']
         materiel = self.trains.loc[train_id, 'typesMateriels'][0]
-        circulation = self.trains.loc[train_id, 'typesCirculation']
+        circulation = self.trains.loc[train_id, 'typeCirculation']
 
         if (self.quai_interdits == [str(it_quai), 'all', 'all', circulation]).all(1).any():
             return True
@@ -242,32 +249,36 @@ class TrainEnv(gym.Env):
 
     def contraintes_itineraire(self, train_id, it_id):
         if it_id == len(self.list_it):
-            return 1
-        c = 0
-        num_train = self.trains.loc[train_id, "id"]
-        index_to_check = self.contraintes[self.contraintes[[0, 1]] == [num_train, it_id]][[0, 1]].dropna().index.tolist()
-        for ind in index_to_check:
-            train = self.contraintes.loc[ind, 2]
-            it = self.contraintes.loc[ind, 3]
-            if train in self.id and it == self.itineraire[self.id.index(train)]:
-                c += self.contraintes.loc[ind, 4]
+            return 20
 
-        index_to_check = self.contraintes[self.contraintes[[2, 3]] == [num_train, it_id]][[2, 3]].dropna().index.tolist()
-        for ind in index_to_check:
-            train = self.contraintes.loc[ind, 0]
-            it = self.contraintes.loc[ind, 1]
-            try:
-                if it == self.itineraire[self.id.index(train)]:
-                    c += self.contraintes.loc[ind, 4]
-            except ValueError:
-                pass
+        # Filter rows where train_id and it_id are relevant
+        mask = (
+                ((self.contraintes[0] == train_id) & (self.contraintes[1] == it_id)) |
+                ((self.contraintes[2] == train_id) & (self.contraintes[3] == it_id))
+        )
+
+        filtered_contraintes = self.contraintes[mask]
+        # Calculate the penalty cost
+        c = filtered_contraintes[
+            (filtered_contraintes[0] == train_id) &
+            (filtered_contraintes[1] == it_id) &
+            (filtered_contraintes[2].map(self.itineraire.get) == filtered_contraintes[3])
+            ][4].sum()
+
+        c += filtered_contraintes[
+            (filtered_contraintes[2] == train_id) &
+            (filtered_contraintes[3] == it_id) &
+            (filtered_contraintes[0].map(self.itineraire.get) == filtered_contraintes[1])
+            ][4].sum()
+
         return c/2000
 
 
 if __name__ == '__main__':
     # Example usage
     random_seed = 10
-    file_path = "instances/inst_A.json"
+    file_path = "instances/inst_PE.json"
+    print("Begin Initialisation...")
     env = TrainEnv(file_path)
 
     # check_env(env)
@@ -280,7 +291,7 @@ if __name__ == '__main__':
 
     # Step 4: Create and train the DQN model
     model = DQN("MlpPolicy", vec_env, verbose=0, learning_rate=1e-3, buffer_size=800, target_update_interval=100)
-    number_of_episodes = 200
+    number_of_episodes = 1000
     max_number_of_steps = env.number_of_trains
     # Tracking cumulative rewards
     episode_rewards = []  # List to store total reward per episode
