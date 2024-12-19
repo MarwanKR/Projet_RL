@@ -48,9 +48,11 @@ class Environnment :
             for action in self.action_spaces[state]:
                 self.Q_values[(state,action["id"])]= 0
                 self.number_of_visits[(state,action["id"])] = 0
-            self.Q_values[(state,len(self.list_it))] = 0  #pour le cas ou on met le train de côté car action_space est vide
+
+            self.Q_values[(state,len(self.list_it))] = 0          #pour le cas ou on met le train de côté car action_space est vide
             self.number_of_visits[(state,len(self.list_it))] = 0
-        self.cost = -self.number_of_trains*500
+
+        self.cost = 0
         
 
     def _init_quai_interdit(self, data):
@@ -167,9 +169,9 @@ class Environnment :
         reward = -self.contraintes_itineraire(current_state,action_id)/100
         
         if self.is_quaie_interdit(current_state,action_id):
-            reward = -1000
+            reward = -100
             self.done = True
-        self.cost+=reward/100
+        self.cost+=reward
         self.Q_values[(current_state,action_id)]  = (self.Q_values[(current_state,action_id)]*self.number_of_visits[(current_state,action_id)] +reward)/(self.number_of_visits[(current_state,action_id)]+1)
         self.number_of_visits[(current_state,action_id)]+=1
         self.current_state_index+=1
@@ -204,10 +206,13 @@ class Environnment :
         for i in range(number_of_episodes):
             while not self.done:
                 self.step()
-            print("episode")
-            list_of_cost.append(self.get_total_cost_of_config())
-            if i%100==0 :
-                print(self.assigned_itineraries) 
+            print(i)
+            if self.cost==0 : 
+                print("assignation optimale")
+                print(self.assigned_itineraries)
+            list_of_cost.append(self.cost)
+            # if i%100==0 :
+            #     print(self.assigned_itineraries) 
             self.reset()
           
         return list_of_cost
