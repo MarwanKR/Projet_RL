@@ -2,19 +2,19 @@ import json
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import time 
-
-class Environnment : 
+import time
 
 
-    def __init__(self,file_path,learning_rate = 0.001):
+class Environnment:
+
+    def __init__(self, file_path, learning_rate=0.001):
         with open(file_path, 'r') as f:
             data = json.load(f)
 
-        #Dataframes
+        # Dataframes
         df_trains = pd.DataFrame(data['trains'])
         df_flat = pd.json_normalize(df_trains[0])
-        df_flat['sensDepart'] = df_flat['sensDepart']*1
+        df_flat['sensDepart'] = df_flat['sensDepart'] * 1
 
         self.trains = df_flat  # Dataframe des trains
         self.id = df_flat['id'].tolist()
@@ -22,19 +22,21 @@ class Environnment :
         self.list_it = pd.DataFrame(data['itineraires'])  # Dataframe des itinéraires
         self.contraintes = pd.DataFrame(data['contraintes'])
         values = self._init_quai_interdit(data)
-        self.quai_interdits = pd.DataFrame(values, columns=["voiesAQuaiInterdites", "voiesEnLigne", "typesMateriels","typesCirculation"])  # Dataframe des quais interdits
-        #parameters and hyperparameters
-        self.learning_rate =learning_rate
+        self.quai_interdits = pd.DataFrame(values, columns=["voiesAQuaiInterdites", "voiesEnLigne", "typesMateriels",
+                                                            "typesCirculation"])  # Dataframe des quais interdits
+        # parameters and hyperparameters
+        self.learning_rate = learning_rate
         self.action_spaces = {}
         self.done = False
         for _, train in self.trains.iterrows():  # Iterate over train rows
             train_action_space = []
             for _, itinerary in self.list_it.iterrows():  # Iterate over itinerary rows
                 # Check conditions for adding an itinerary to the train's action space
-                if itinerary["sensDepart"] * 1 == train["sensDepart"] and itinerary["voieEnLigne"] == train["voieEnLigne"]:
+                if itinerary["sensDepart"] * 1 == train["sensDepart"] \
+                        and itinerary["voieEnLigne"] == train["voieEnLigne"]:
                     train_action_space.append(itinerary)
-            if (train_action_space==[]) : 
-                print("train sans action space",train)
+            if not train_action_space:
+                print("train sans action space", train)
             self.action_spaces[train["id"]] = train_action_space
 
         self.state_space = self.trains["id"]
@@ -201,12 +203,12 @@ class Environnment :
         
     
     def get_total_cost_of_config(self):
-        timestamp1 = time.time()
+        # timestamp1 = time.time()
         cost = 0
         for train_id in self.trains["id"]:
             it_id = self.assigned_itineraries[train_id]
-            cost+=self.contraintes_itineraire(train_id,it_id)/100
-        print(time.time()-timestamp1,"temps pour calcul cost")
+            cost += self.contraintes_itineraire(train_id, it_id) / 100
+        # print(time.time()-timestamp1,"temps pour calcul cost")
         return -cost
     def reset(self):
         """
@@ -250,14 +252,6 @@ class Environnment :
         return list_of_cost, max_cost, best_itinerary
             
 
-
-    
-
-
-
-
-
-
 if __name__ == '__main__':
     env = Environnment(r'/Users/elie/Desktop/Polytechnique/RL/Projet/instances/Asmall.json')
     env.print_env()
@@ -266,6 +260,6 @@ if __name__ == '__main__':
     print(f"Maximum cost: {max_cost}")
     for train, itinerary in best_itinerary.items():
         print(f"The Train {train} is associated with the itinerary {itinerary}")
-    #print(f"Best itinerary: {best_itinerary}")
+    # print(f"Best itinerary: {best_itinerary}")
     plt.plot(results)
     plt.show()
