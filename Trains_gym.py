@@ -82,20 +82,20 @@ class TrainEnv(gym.Env):
         # Action-space
         # self.max_it = max(self.len_compatible_it)
         self.itineraire = {}
-        for train_id in range(self.number_of_trains):
-            self.itineraire[train_id] = len(self.list_it)  # Initialisation avec None
+        for train_num in self.id:
+            self.itineraire[train_num] = len(self.list_it)  # Initialisation avec None
         print(self.itineraire, "dans init")
 
         # Définir l'espace d'action et d'observation
-        self.action_space = spaces.Discrete(max(self.len_compatible_it))
+        self.action_space = spaces.Discrete(np.max(self.len_compatible_it))
         self.observation_space = spaces.Discrete(self.number_of_trains+1)
 
         self.state = None
 
         self.render_mode = 'human'
-        self.last_it = self.itineraire
+        self.last_it = self.itineraire.copy()
         self.cost = 0
-        self.first_cost = 0 # self._get_info(reset=True)['cost_config']
+        self.first_cost = 0  # self._get_info(reset=True)['cost_config']
 
     def _init_quai_interdit(self, data):
         df_quai_interdits = pd.DataFrame(data['interdictionsQuais'])
@@ -132,7 +132,7 @@ class TrainEnv(gym.Env):
         if do:
             cost = 0
             for train in range(self.number_of_trains):
-                cost -= self.contraintes_itineraire(train, self.itineraire[train])
+                cost -= self.contraintes_itineraire(train, self.itineraire[self.id[train]])
             self.cost = cost
             info = {'cost_config': self.cost, 'itineraire': list(self.itineraire.values())}
         return info
@@ -140,14 +140,12 @@ class TrainEnv(gym.Env):
     def reset(self, seed=None, options=None):
         self.np_random, seed = gym.utils.seeding.np_random(seed)
         self.current_step = 0
-        np.random.shuffle(self.current_id)
-        for train_id in range(self.number_of_trains):
-            self.itineraire[train_id] = len(self.list_it)  # Itinéraire de la SNCF par défaut
-        self.last_it = np.copy(self.itineraire)
+        # np.random.shuffle(self.current_id)
+        self.itineraire = self.last_it.copy()
         
         self.done = False
         self.state = self._get_obs()
-        self.cost = self.first_cost
+        self.cost = 0  # self.first_cost
         # print(self.state["itineraire"].shape,"dans reset")
         return self.state, {}
 
@@ -155,7 +153,8 @@ class TrainEnv(gym.Env):
         train_id = self._get_obs()
         it_id = self.dict_it[train_id][action % self.len_compatible_it[train_id]]
         self.set_itineraire(train_id, it_id)
-        reward = -self.contraintes_itineraire(train_id, it_id)
+        reward = -self.contraintes_itineraire(self.id[train_id], it_id)
+        self.cost += reward
         info = {}
         # print(self.current_step)
         # if not self.is_it_incompatible(train_id, it_id) and not self.is_quaie_interdit(train_id, it_id):
@@ -169,18 +168,11 @@ class TrainEnv(gym.Env):
         self.current_step += 1
         if self.current_step == self.number_of_trains:
             self.done = True
-            info = self._get_info(do=True)
+            info = {'cost_config': self.cost, 'itineraire': list(self.itineraire.values())}  # self._get_info(do=True)
+            # if info['cost_config']*reward == 0:
+            #     print(info['cost_config'])
+            #     pass
         return self._get_obs(), reward, self.done, False, info
-
-    def render(self, mode='human'):
-        # print("Current Itineraire:")
-        # print(self.itineraire)
-        cost = 0
-        for train in range(self.number_of_trains):
-            if self.done:
-                return -30
-            cost -= self.contraintes_itineraire(train, self.itineraire[train])
-        return cost
 
 
     def close(self):
@@ -188,8 +180,7 @@ class TrainEnv(gym.Env):
 
     # Méthodes existantes adaptées
     def set_itineraire(self, train_id, new_itineraire):
-        self.last_it = np.copy(self.itineraire)
-        self.itineraire[train_id] = new_itineraire
+        self.itineraire[self.id[train_id]] = new_itineraire
     
     # Implémentation des vérifications et contraintes existantes...
     def is_it_incompatible(self, train_id, it_id):
@@ -247,102 +238,96 @@ class TrainEnv(gym.Env):
 
         return False
 
-    def contraintes_itineraire(self, train_id, it_id):
+    def contraintes_itineraire(self, train_num, it_id):
         if it_id == len(self.list_it):
             return 20
 
         # Filter rows where train_id and it_id are relevant
         mask = (
-                ((self.contraintes[0] == train_id) & (self.contraintes[1] == it_id)) |
-                ((self.contraintes[2] == train_id) & (self.contraintes[3] == it_id))
+                ((self.contraintes[0] == train_num) & (self.contraintes[1] == it_id)) |
+                ((self.contraintes[2] == train_num) & (self.contraintes[3] == it_id))
         )
 
         filtered_contraintes = self.contraintes[mask]
         # Calculate the penalty cost
         c = filtered_contraintes[
-            (filtered_contraintes[0] == train_id) &
+            (filtered_contraintes[0] == train_num) &
             (filtered_contraintes[1] == it_id) &
             (filtered_contraintes[2].map(self.itineraire.get) == filtered_contraintes[3])
             ][4].sum()
 
         c += filtered_contraintes[
-            (filtered_contraintes[2] == train_id) &
+            (filtered_contraintes[2] == train_num) &
             (filtered_contraintes[3] == it_id) &
             (filtered_contraintes[0].map(self.itineraire.get) == filtered_contraintes[1])
             ][4].sum()
 
-        return c/2000
+        return c/1000
 
 
 if __name__ == '__main__':
     # Example usage
     random_seed = 10
-    file_path = "instances/inst_PE.json"
-    print("Begin Initialisation...")
-    env = TrainEnv(file_path)
+    file_path_list = ["Asmall", "inst_A", "inst_NS", "inst_PMP"]
+    for file_path in file_path_list:
+        print("Begin Initialisation...")
+        env = TrainEnv("instances/"+file_path+".json")
 
-    # check_env(env)
-    # Display data
-    dep = env.sens_depart
-    print(dep, "sens des départs")
+        # check_env(env)
+        # Display data
+        dep = env.sens_depart
+        print(dep, "sens des départs")
 
-    # Step 3: Vectorize the environment
-    vec_env = DummyVecEnv([lambda: env])
+        # Step 3: Vectorize the environment
+        vec_env = DummyVecEnv([lambda: env])
 
-    # Step 4: Create and train the DQN model
-    model = DQN("MlpPolicy", vec_env, verbose=0, learning_rate=1e-3, buffer_size=800, target_update_interval=100)
-    number_of_episodes = 1000
-    max_number_of_steps = env.number_of_trains
-    # Tracking cumulative rewards
-    episode_rewards = []  # List to store total reward per episode
-    episode_rewards2 = []
-    cumulative_reward = 0  # Cumulative reward for the current episode
-    cumulative_reward2 = 0
-    track_number_of_steps = []
-    Itineraires = []
-    # Progress bar
-    with tqdm(total=number_of_episodes, desc="Training Progress") as pbar:
-        for _ in range(number_of_episodes):
-            # Simulate environment to track cumulative rewards
-            obs = vec_env.reset()  # Reset the environment
-            done = False
-            cumulative_reward = 0  # Reset reward for new episode
-            cumulative_reward2 = 0
-            number_of_steps = 0
-            while not done and number_of_steps<max_number_of_steps:
-                model.learn(total_timesteps=1, reset_num_timesteps=False)
-                number_of_steps += 1
-                action, _ = model.predict(obs, deterministic=True)
-                obs, reward, done, info = vec_env.step(action)
-                # cumulative_reward2 += info[0]['cost_config']  # Accumulate rewards
-                cumulative_reward = reward + cumulative_reward*0.95  # Accumulate rewards
+        # Step 4: Create and train the DQN model
+        model = DQN("MlpPolicy", vec_env, verbose=0, learning_rate=1e-3, buffer_size=800, target_update_interval=100)
+        number_of_episodes = 200
+        max_number_of_steps = env.number_of_trains
+        # Tracking cumulative rewards
+        episode_rewards = []  # List to store total reward per episode
+        episode_rewards2 = []
+        cumulative_reward = 0  # Cumulative reward for the current episode
+        cumulative_reward2 = 0
+        track_number_of_steps = []
+        Itineraires = []
+        max = -1e5  # Best cost
+        # Progress bar
+        with tqdm(total=number_of_episodes, desc="Training Progress") as pbar:
+            for _ in range(number_of_episodes):
+                # Simulate environment to track cumulative rewards
+                obs = vec_env.reset()  # Reset the environment
+                done = False
+                cumulative_reward = 0  # Reset reward for new episode
+                cumulative_reward2 = 0
+                number_of_steps = 0
+                while not done and number_of_steps<max_number_of_steps:
+                    model.learn(total_timesteps=1, reset_num_timesteps=False)
+                    number_of_steps += 1
+                    action, _ = model.predict(obs, deterministic=True)
+                    obs, reward, done, info = vec_env.step(action)
+                    # cumulative_reward2 += info[0]['cost_config']  # Accumulate rewards
+                    cumulative_reward = reward + cumulative_reward  # Accumulate rewards
+                if info[0]['cost_config'] > max:
+                    max = info[0]['cost_config']
+                    itinary = info[0]['itineraire']
+                episode_rewards.append(cumulative_reward)  # Log reward for this episode
+                episode_rewards2.append(info[0]['cost_config'])
+                pbar.update(1)
+        print(file_path)
+        print(max)
+        print(itinary)
+        # Plot the evolution of expected return
+        plt.figure(figsize=(10, 6))
+        # plt.plot(episode_rewards, label="Cumulative Reward")
+        plt.plot(episode_rewards2, label=f"instance {file_path}")
+        plt.xlabel("Episode")
+        plt.ylabel("Total cost of the configuration")
+        plt.title("Evolution of the total cost during training")
+        plt.legend()
 
-            Itineraires.append(info[0]['itineraire'])
-            track_number_of_steps.append(number_of_steps)
-            episode_rewards.append(cumulative_reward)  # Log reward for this episode
-            episode_rewards2.append(info[0]['cost_config'])
-            pbar.update(1)
-            # print(info[0]['itineraire'])
-    # Plot the evolution of expected return
-    plt.figure(figsize=(10, 6))
-    plt.plot(episode_rewards, label="Cumulative Reward")
-    plt.plot(episode_rewards2, label="Total cost")
-    plt.xlabel("Episode")
-    plt.ylabel("Cumulative Reward")
-    plt.title("Evolution of Expected Return During Training")
-    plt.legend()
-    plt.figure(figsize=(10, 6))
-    plt.plot(track_number_of_steps, label="number of steps")
-    plt.xlabel("Episode")
-    plt.ylabel("number of steps")
-    plt.title("Evolution of number of steps before done")
-    plt.legend()
-    plt.grid()
-    plt.figure(figsize=(10, 6))
-    plt.plot(Itineraires, 'o', label=[f'train {i}' for i in range(env.number_of_trains)])
-    plt.xlabel("Episode")
-    plt.ylabel("Itineraire")
-    plt.title("Evolution des itinéraires finaux")
-    plt.legend()
-    plt.grid()
+        # Enregistrer la figure au format PNG
+        plt.savefig(f'figure_DQN_{file_path}.png', dpi=300, bbox_inches='tight')  # Résolution 300 DPI
+
     plt.show()
