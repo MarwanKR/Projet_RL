@@ -230,10 +230,15 @@ class Environnment :
         Output : the list of costs per episode
         """
         list_of_cost = []
+        max_cost = -1e10
+        best_itinerary = None
         for i in range(number_of_episodes):
             while not self.done:
                 self.step()
-            
+            total_cost = self.get_total_cost_of_config()
+            if total_cost > max_cost:
+                max_cost = total_cost
+                best_itinerary = self.assigned_itineraries.copy()
             if self.cost==0 : 
                 print("assignation optimale")
                 print(self.assigned_itineraries)
@@ -242,7 +247,7 @@ class Environnment :
             #     print(self.assigned_itineraries) 
             self.reset()
           
-        return list_of_cost
+        return list_of_cost, max_cost, best_itinerary
             
 
 
@@ -254,9 +259,13 @@ class Environnment :
 
 
 if __name__ == '__main__':
-    env = Environnment(r'C:\Users\cocor\Documents\CoursPolyMontreal\Reinforcement Learning\projet\sujet4\instances\inst_PE.json')
+    env = Environnment(r'/Users/elie/Desktop/Polytechnique/RL/Projet/instances/Asmall.json')
     env.print_env()
 
-    results = env.train_model(201)
+    results, max_cost, best_itinerary = env.train_model(201)
+    print(f"Maximum cost: {max_cost}")
+    for train, itinerary in best_itinerary.items():
+        print(f"The Train {train} is associated with the itinerary {itinerary}")
+    #print(f"Best itinerary: {best_itinerary}")
     plt.plot(results)
     plt.show()
